@@ -2,7 +2,7 @@ Config = {}
 
 -- Still Settings
 Config.Prop = 'p_still03x'
-Config.BrewTime = 300000 -- 5 minutes in milliseconds
+Config.BrewTime = 600000 -- 10 minutes in milliseconds
 
 -- Admin Settings
 Config.AdminGroups = {
@@ -32,15 +32,35 @@ Config.Smoke = {
     OffsetZ = -1.6
 }
 
--- Recipe
-Config.Recipe = {
-    { item = 'sugar', amount = 1, label = 'Sugar' },
-    { item = 'malt', amount = 1, label = 'Malt' },
-    { item = 'water', amount = 1, label = 'Water' }
-}
+
 
 -- Output
 Config.Output = {
     item = 'moonshine',
     amount = 1
+}
+
+Config.Recipe = {
+    {
+        item = 'sugar',
+        label = 'Sugar',
+        amount = 1,
+        source = 'General Store',
+        sourceDetails = 'Available at Stores or farming '
+    },
+    {
+        item = 'malt',
+        label = 'Malt',
+        amount = 1,
+        source = 'Farming or Market',
+        sourceDetails = 'Can be harvested from farms or bought at market stalls'
+    },
+    {
+        item = 'water',
+        label = 'Water',
+        amount = 1,
+        source = 'shops',
+        sourceDetails = 'Collect from any shops'
+    }
+    
 }
