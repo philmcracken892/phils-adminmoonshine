@@ -315,7 +315,7 @@ function OpenStillMenu(stillId, skipThread)
                 icon = statusIcon,
                 progress = percent,
                 colorScheme = statusColor,
-                disabled = true
+                disabled = false
             }
             
             options[#options + 1] = {
