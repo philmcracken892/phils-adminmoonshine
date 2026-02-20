@@ -50,6 +50,54 @@ local function GetBrewingIcon(percent)
 end
 
 -----------------
+-- INVENTORY CHECK FUNCTIONS (FIXED)
+-----------------
+local function GetItemCount(itemName)
+    local count = 0
+    local PlayerData = RSGCore.Functions.GetPlayerData()
+    
+    if not PlayerData or not PlayerData.items then
+        return 0
+    end
+    
+    for _, item in pairs(PlayerData.items) do
+        if item and item.name == itemName then
+            count = count + (item.amount or item.count or 1)
+        end
+    end
+    
+    return count
+end
+
+local function HasItem(itemName, requiredAmount)
+    local amount = requiredAmount or 1
+    local count = GetItemCount(itemName)
+    return count >= amount
+end
+
+local function HasIngredients()
+    for _, ingredient in ipairs(Config.Recipe) do
+        if not HasItem(ingredient.item, ingredient.amount) then
+            return false
+        end
+    end
+    return true
+end
+
+local function GetIngredientStatus()
+    local status = ""
+    for i, ingredient in ipairs(Config.Recipe) do
+        local playerHas = GetItemCount(ingredient.item)
+        local has = playerHas >= ingredient.amount
+        status = status .. ingredient.label .. ': ' .. (has and '[Y]' or '[N]') .. ' (' .. playerHas .. '/' .. ingredient.amount .. ')'
+        if i < #Config.Recipe then
+            status = status .. '\n'
+        end
+    end
+    return status
+end
+
+-----------------
 -- OX TARGET
 -----------------
 CreateThread(function()
@@ -106,27 +154,114 @@ function GetNearestStillId()
 end
 
 -----------------
--- CHECK INGREDIENTS
+-- INGREDIENT SOURCE MENU
 -----------------
-local function HasIngredients()
-    for _, ingredient in ipairs(Config.Recipe) do
-        if not RSGCore.Functions.HasItem(ingredient.item) then
-            return false
-        end
-    end
-    return true
-end
-
-local function GetIngredientStatus()
-    local status = ""
+function OpenIngredientSourceMenu(stillId)
+    local options = {}
+    
+    -- Recipe summary header
+    local recipeText = ''
     for i, ingredient in ipairs(Config.Recipe) do
-        local has = RSGCore.Functions.HasItem(ingredient.item)
-        status = status .. ingredient.label .. ': ' .. (has and '[Y]' or '[N]')
+        recipeText = recipeText .. ingredient.amount .. 'x ' .. ingredient.label
         if i < #Config.Recipe then
-            status = status .. ' | '
+            recipeText = recipeText .. ' + '
         end
     end
-    return status
+    recipeText = recipeText .. ' = ' .. Config.Output.amount .. 'x Moonshine'
+    
+    options[#options + 1] = {
+        title = 'Recipe Summary',
+        description = recipeText .. '\nBrew Time: ' .. FormatTime(Config.BrewTime / 1000),
+        icon = 'fas fa-scroll',
+        iconColor = '#f39c12',
+        disabled = false
+    }
+    
+    options[#options + 1] = {
+        title = '── Ingredients ──',
+        icon = 'fas fa-list',
+        iconColor = '#95a5a6',
+        disabled = false
+    }
+    
+    -- Each ingredient with source info
+    for _, ingredient in ipairs(Config.Recipe) do
+        local playerHas = GetItemCount(ingredient.item)
+        local hasEnough = playerHas >= ingredient.amount
+        local statusIcon = hasEnough and 'fas fa-check-circle' or 'fas fa-times-circle'
+        local statusColor = hasEnough and '#2ecc71' or '#e74c3c'
+        
+        local sourceText = ingredient.source or 'Unknown Location'
+        local detailsText = ingredient.sourceDetails or 'No additional information'
+        
+        options[#options + 1] = {
+            title = ingredient.label .. ' (' .. playerHas .. '/' .. ingredient.amount .. ')',
+            description = 'Source: ' .. sourceText .. '\n' .. detailsText,
+            icon = statusIcon,
+            iconColor = statusColor,
+            metadata = {
+                {label = 'Required', value = tostring(ingredient.amount)},
+                {label = 'You Have', value = tostring(playerHas)},
+                {label = 'Status', value = hasEnough and 'Ready' or 'Need More'}
+            }
+        }
+    end
+    
+    -- Set waypoint options for missing ingredients
+    local hasMissingWithCoords = false
+    for _, ingredient in ipairs(Config.Recipe) do
+        if ingredient.coords and not HasItem(ingredient.item, ingredient.amount) then
+            hasMissingWithCoords = true
+            break
+        end
+    end
+    
+    if hasMissingWithCoords then
+        options[#options + 1] = {
+            title = '── Waypoints ──',
+            icon = 'fas fa-map-marker-alt',
+            iconColor = '#95a5a6',
+            disabled = true
+        }
+        
+        for _, ingredient in ipairs(Config.Recipe) do
+            if ingredient.coords and not HasItem(ingredient.item, ingredient.amount) then
+                options[#options + 1] = {
+                    title = 'Set Waypoint: ' .. ingredient.label,
+                    description = 'Mark ' .. ingredient.source .. ' on your map',
+                    icon = 'fas fa-map-marker-alt',
+                    iconColor = '#3498db',
+                    onSelect = function()
+                        SetNewWaypoint(ingredient.coords.x, ingredient.coords.y)
+                        RSGCore.Functions.Notify('Waypoint set for ' .. ingredient.label, 'success')
+                    end
+                }
+            end
+        end
+    end
+    
+    -- Back button
+    options[#options + 1] = {
+        title = 'Back to Still Menu',
+        description = 'Return to the main menu',
+        icon = 'fas fa-arrow-left',
+        iconColor = '#3498db',
+        onSelect = function()
+            OpenStillMenu(stillId)
+        end
+    }
+    
+    lib.registerContext({
+        id = 'moonshine_ingredient_menu',
+        title = 'Ingredient Sources',
+        options = options,
+        onExit = function()
+            isMenuOpen = false
+            currentMenuStillId = nil
+        end
+    })
+    
+    lib.showContext('moonshine_ingredient_menu')
 end
 
 -----------------
@@ -159,6 +294,16 @@ function OpenStillMenu(stillId, skipThread)
                     brewingStills[stillId] = nil
                 end
             }
+            
+            options[#options + 1] = {
+                title = 'Recipe Info',
+                description = 'View ingredients and where to find them',
+                icon = 'fas fa-book-open',
+                iconColor = '#9b59b6',
+                onSelect = function()
+                    OpenIngredientSourceMenu(stillId)
+                end
+            }
         else
             local remainingSecs = math.ceil(remaining / 1000)
             local statusText, statusColor = GetBrewingStatus(percent)
@@ -170,7 +315,17 @@ function OpenStillMenu(stillId, skipThread)
                 icon = statusIcon,
                 progress = percent,
                 colorScheme = statusColor,
-                disabled = false
+                disabled = true
+            }
+            
+            options[#options + 1] = {
+                title = 'Recipe Info',
+                description = 'View ingredients and where to find them',
+                icon = 'fas fa-book-open',
+                iconColor = '#9b59b6',
+                onSelect = function()
+                    OpenIngredientSourceMenu(stillId)
+                end
             }
             
             options[#options + 1] = {
@@ -195,7 +350,7 @@ function OpenStillMenu(stillId, skipThread)
         local hasItems = HasIngredients()
         
         options[#options + 1] = {
-            title = 'Start Brewing',
+            title = hasItems and 'Start Brewing' or 'Start Brewing (Missing Items)',
             description = GetIngredientStatus(),
             icon = 'fas fa-play-circle',
             iconColor = hasItems and '#2ecc71' or '#e74c3c',
@@ -209,21 +364,27 @@ function OpenStillMenu(stillId, skipThread)
             end
         }
         
-        local recipeText = ''
-        for i, ingredient in ipairs(Config.Recipe) do
-            recipeText = recipeText .. ingredient.amount .. 'x ' .. ingredient.label
-            if i < #Config.Recipe then
-                recipeText = recipeText .. ' + '
+        -- Count missing ingredients
+        local missingCount = 0
+        for _, ingredient in ipairs(Config.Recipe) do
+            if not HasItem(ingredient.item, ingredient.amount) then
+                missingCount = missingCount + 1
             end
         end
-        recipeText = recipeText .. ' = ' .. Config.Output.amount .. 'x Moonshine'
+        
+        local recipeDesc = 'View all ' .. #Config.Recipe .. ' ingredients and their locations'
+        if missingCount > 0 then
+            recipeDesc = missingCount .. ' ingredient(s) missing - Click to see where to find them!'
+        end
         
         options[#options + 1] = {
             title = 'Recipe Info',
-            description = recipeText .. '\nBrew Time: ' .. FormatTime(Config.BrewTime / 1000),
+            description = recipeDesc,
             icon = 'fas fa-book-open',
             iconColor = '#9b59b6',
-            disabled = true
+            onSelect = function()
+                OpenIngredientSourceMenu(stillId)
+            end
         }
     end
     
@@ -341,7 +502,6 @@ end
 -- CREATE STILL
 -----------------
 local function CreateStill(id, data)
-    -- Skip if already exists
     if placedStills[id] and placedStills[id].entity and DoesEntityExist(placedStills[id].entity) then
         return
     end
@@ -401,7 +561,6 @@ end
 -----------------
 RegisterNetEvent('rsg-moonshiner:client:loadStills')
 AddEventHandler('rsg-moonshiner:client:loadStills', function(stills, brewingData)
-    -- Clear existing
     for id, _ in pairs(placedStills) do
         RemoveStill(id)
     end
@@ -413,7 +572,6 @@ AddEventHandler('rsg-moonshiner:client:loadStills', function(stills, brewingData
     
     Wait(1500)
     
-    -- Create stills
     if stills then
         for id, data in pairs(stills) do
             CreateStill(id, data)
@@ -421,7 +579,6 @@ AddEventHandler('rsg-moonshiner:client:loadStills', function(stills, brewingData
         end
     end
     
-    -- Load brewing states
     if brewingData then
         for stillId, elapsedSeconds in pairs(brewingData) do
             if elapsedSeconds then
@@ -512,7 +669,7 @@ AddEventHandler('rsg-moonshiner:client:openMenu', function()
     
     lib.registerContext({
         id = 'moonshine_admin_menu',
-        title = 'Moonshine Stills Management',
+        title = 'Moonshine  Management',
         options = {
             {
                 title = 'Place Still Here',
